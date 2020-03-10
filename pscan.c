@@ -1,4 +1,4 @@
-/*
+/**
  * +---------------------------------------------------------+
  * name: pscan
  * description: port scanner
@@ -6,17 +6,22 @@
  * author: crtube
  * license: MIT (see LICENSE)
  * compile with: gcc pscan.c -o pscan -lpthread
- *
+ * +---------------------------------------------------------+
  * todo:
- * - implement UDP scanning
  * - implement ping
  * - parse arguments better
+ * - create a timeout method for TCP
+ * - consider optimizing port scanning method
  * +---------------------------------------------------------+
-*/
+**/
+
+#define DETAILS 16
+#define VERSION "v0.9"
 
 #include <poll.h>
 #include <stdio.h>
 #include <netdb.h>
+#include <errno.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -34,6 +39,10 @@ typedef struct {
 	int min_range;
 	int max_range;
 } scanData;
+
+char* bnr = "pscan %s by crtube\n"
+				"do 'sed %dq pscan.c' to check details\n"
+				"not for human consumption\n";
 
 void dlog(char* msg, int level) {
 	switch(level) {
@@ -73,7 +82,11 @@ void destroyScanData(scanData* sd) {
 }
 
 void banner() {
-	printf("pscan by crtube\nnot for human consumption\n");
+	printf(bnr, VERSION, DETAILS);
+}
+
+int connTimeoutTCP(int fd, struct sockaddr_in d) {
+	// TODO
 }
 
 void* scanTCP(void* arg) {
@@ -143,18 +156,30 @@ int recvUDP(int fd) {
 	while(1) {
 		int ne = poll(p, 1, 0);
 
-		if(ne == -1) {
+		if((ne = poll(p, 1, 1000)) == -1) {
 			dlog("poll error", 2);
 			return -1;
-		}
-
-		if(p[0].revents & POLLIN) {
-			// recvfrom (unreach)
-			if(recvfrom(p[0].fd, buf, sizeof(buf), 0, NULL, NULL) == -1)
-				return -1;
-
-			// TODO
 		} 
+
+		if(ne != 0) {
+			if(p[0].revents & POLLIN) {
+				// recvfrom (unreach)
+				if(recvfrom(p[0].fd, buf, sizeof(buf), 0, NULL, NULL) == -1)
+					return -1;
+
+				ih = (struct ip*)buf;
+				ilen = ih->ip_hl << 2;
+
+				icmph = (struct icmp*)(buf + ilen);
+
+				if(icmph->icmp_type == ICMP_UNREACH && icmph->icmp_code == ICMP_UNREACH_PORT)
+					return 0;
+				else
+					return 1;
+			}
+		} else {
+			return 2;
+		}
 	}
 }
 
@@ -182,7 +207,6 @@ void* scanUDP(void* arg) {
 	for(; i != sd->max_range + 1; i++) {
 		d.sin_port = htons(i);
 
-		printf("at port %d\r", i);
 		if((fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
 			dlog("standard socket create fail", 2);
 
@@ -193,26 +217,29 @@ void* scanUDP(void* arg) {
 			printf("udp send fail @ %d\n", i);
 
 		code = recvUDP(rfd);
+		serv = getservbyport(htons(i), "udp");
+
 		switch(code) {
 			case -1:
 				dlog("icmp recv fail", 2);
 				break;
-			case 0:
-				dlog("no conn", 1);
-				break;
 			case 1:
-				serv = getservbyport(htons(i), "udp");
 				if(serv != NULL)
 					printf("UDP port %d open - service %s\n", i, serv->s_name);
 				else
 					printf("UDP port %d open - service unknown\n", i);
 
 				break;
+			case 2:
+				if(serv != NULL)
+					printf("UDP port %d blocked - service %s\n", i, serv->s_name);
+				else
+					printf("UDP port %d blocked - service unknown\n", i);
+				break;
 			default:
 				break;
 		}
 
-		fflush(stdout);
 		close(fd);
 		close(rfd);
 	}
