@@ -5,4 +5,4 @@ port scanner in C
 `sudo ./pscan <host> <starting port number> <ending port number>`
 
 ## can i use this?
-not yet. figuring stuff out :/
+yes
