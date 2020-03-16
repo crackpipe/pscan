@@ -33,9 +33,6 @@
 #include <netinet/in.h>
 #include <netinet/ip_icmp.h>
 
-#define TCP 0
-#define UDP 1
-
 typedef struct {
 	char* addr;
 	int min_range;
